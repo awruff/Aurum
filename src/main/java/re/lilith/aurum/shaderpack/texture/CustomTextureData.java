@@ -3,6 +3,7 @@ package re.lilith.aurum.shaderpack.texture;
 import re.lilith.aurum.gl.texture.InternalTextureFormat;
 import re.lilith.aurum.gl.texture.PixelFormat;
 import re.lilith.aurum.gl.texture.PixelType;
+import re.lilith.aurum.gl.texture.TextureType;
 
 public abstract class CustomTextureData {
     private CustomTextureData() {
@@ -65,85 +66,48 @@ public abstract class CustomTextureData {
         }
     }
 
-    public abstract static class RawData extends CustomTextureData {
+    public static final class RawData extends CustomTextureData {
         private final byte[] content;
+        private final TextureType type;
         private final InternalTextureFormat internalFormat;
         private final PixelFormat pixelFormat;
         private final PixelType pixelType;
+        private final int sizeX;
+        private final int sizeY;
+        private final int sizeZ;
+        private final TextureFilteringData filteringData;
 
-        private RawData(byte[] content, InternalTextureFormat internalFormat,
-                        PixelFormat pixelFormat, PixelType pixelType) {
+        public RawData(byte[] content, TextureType type, InternalTextureFormat internalFormat, PixelFormat pixelFormat,
+                       PixelType pixelType, int sizeX, int sizeY, int sizeZ, TextureFilteringData filteringData) {
             this.content = content;
+            this.type = type;
             this.internalFormat = internalFormat;
             this.pixelFormat = pixelFormat;
             this.pixelType = pixelType;
-        }
-
-        public final byte[] getContent() {
-            return content;
-        }
-
-        public final InternalTextureFormat getInternalFormat() {
-            return internalFormat;
-        }
-
-        public final PixelFormat getPixelFormat() {
-            return pixelFormat;
-        }
-
-        public final PixelType getPixelType() {
-            return pixelType;
-        }
-    }
-
-    public static final class RawData1D extends RawData {
-        private final int sizeX;
-
-        private RawData1D(byte[] content, InternalTextureFormat internalFormat,
-                          PixelFormat pixelFormat, PixelType pixelType, int sizeX) {
-            super(content, internalFormat, pixelFormat, pixelType);
-
-            this.sizeX = sizeX;
-        }
-
-        public int getSizeX() {
-            return sizeX;
-        }
-    }
-
-    public static final class RawData2D extends RawData {
-        int sizeX;
-        int sizeY;
-
-        private RawData2D(byte[] content, InternalTextureFormat internalFormat,
-                          PixelFormat pixelFormat, PixelType pixelType, int sizeX, int sizeY) {
-            super(content, internalFormat, pixelFormat, pixelType);
-
-            this.sizeX = sizeX;
-            this.sizeY = sizeY;
-        }
-
-        public int getSizeX() {
-            return sizeX;
-        }
-
-        public int getSizeY() {
-            return sizeY;
-        }
-    }
-
-    public static final class RawData3D extends RawData {
-        int sizeX;
-        int sizeY;
-        int sizeZ;
-
-        private RawData3D(byte[] content, InternalTextureFormat internalFormat,
-                          PixelFormat pixelFormat, PixelType pixelType, int sizeX, int sizeY, int sizeZ) {
-            super(content, internalFormat, pixelFormat, pixelType);
-
             this.sizeX = sizeX;
             this.sizeY = sizeY;
             this.sizeZ = sizeZ;
+            this.filteringData = filteringData;
+        }
+
+        public byte[] getContent() {
+            return content;
+        }
+
+        public TextureType getType() {
+            return type;
+        }
+
+        public InternalTextureFormat getInternalFormat() {
+            return internalFormat;
+        }
+
+        public PixelFormat getPixelFormat() {
+            return pixelFormat;
+        }
+
+        public PixelType getPixelType() {
+            return pixelType;
         }
 
         public int getSizeX() {
@@ -156,6 +120,10 @@ public abstract class CustomTextureData {
 
         public int getSizeZ() {
             return sizeZ;
+        }
+
+        public TextureFilteringData getFilteringData() {
+            return filteringData;
         }
     }
 }

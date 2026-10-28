@@ -41,7 +41,7 @@ dependencies {
     mappings(variantOf(libs.legacy.yarn) { classifier("v2") })
 
     modImplementation(libs.fabric.loader)
-    modImplementation(libs.lenis)
+    modImplementation(libs.pylon)
     modImplementation(libs.devauth.fabric)
 
     modImplementation(libs.argentum)
@@ -71,14 +71,38 @@ fun DependencyHandlerScope.bundled(
     }
 }
 
+val packtest = sourceSets.create("packtest")
+packtest.compileClasspath += sourceSets.main.get().output + sourceSets.main.get().compileClasspath
+packtest.runtimeClasspath += sourceSets.main.get().output + sourceSets.main.get().runtimeClasspath
+
 loom {
     accessWidenerPath.set(
         file("src/main/resources/aurum.accesswidener")
     )
 
-    runs.all {
+    mods {
+        create("aurum") {
+            sourceSet(sourceSets.main.get())
+        }
+        create("aurum-packtest") {
+            sourceSet(packtest)
+        }
+    }
+
+    runs.named("client") {
         jvmArguments.add("-Ddevauth.enabled=true")
         jvmArguments.add("-Ddevauth.account=alt")
+    }
+
+    runs.create("packTest") {
+        inherit(runs.getByName("client"))
+        jvmArguments.empty()
+        sourceSet = packtest.name
+        displayName = "Shader Pack Test"
+        systemProperties.put("aurum.packtest", "true")
+        providers.gradleProperty("packs").orNull?.let { systemProperties.put("aurum.packtest.packs", it) }
+        providers.gradleProperty("packTime").orNull?.let { systemProperties.put("aurum.packtest.time", it) }
+        providers.gradleProperty("glDebug").orNull?.let { systemProperties.put("aurum.packtest.glDebug", it) }
     }
 }
 

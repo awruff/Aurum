@@ -1,15 +1,18 @@
 package re.lilith.aurum.gl.shader;
 
 import com.google.common.collect.ImmutableList;
+import net.minecraft.client.MinecraftClient;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.system.Platform;
+import re.lilith.aurum.expression.BiomeCategories;
 import re.lilith.aurum.pipeline.WorldRenderingPhase;
 import re.lilith.aurum.pipeline.pathways.HandRenderer;
 import re.lilith.aurum.shaderpack.AurumLimits;
 import re.lilith.aurum.shaderpack.StringPair;
 import re.lilith.aurum.texture.format.TextureFormat;
 import re.lilith.aurum.texture.format.TextureFormatLoader;
+import re.lilith.aurum.uniforms.BiomeUniforms;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -17,6 +20,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class StandardMacros {
+    // The Iris release whose shader pack behaviour this mod tracks, encoded the way Iris encodes IRIS_VERSION.
+    private static final String IRIS_COMPAT_VERSION = "11104";
+
     private static final Pattern SEMVER_PATTERN = Pattern.compile("(?<major>\\d+)\\.(?<minor>\\d+)\\.*(?<bugfix>\\d*)(.*)");
 
     private static void define(List<StringPair> defines, String key) {
@@ -31,6 +37,8 @@ public class StandardMacros {
         ArrayList<StringPair> standardDefines = new ArrayList<>();
 
         define(standardDefines, "MC_VERSION", getMcVersion());
+        define(standardDefines, "MC_MIPMAP_LEVEL", String.valueOf(MinecraftClient.getInstance().options.mipmapLevels));
+        define(standardDefines, "IRIS_VERSION", IRIS_COMPAT_VERSION);
         define(standardDefines, "MC_GL_VERSION", getGlVersion(GL20C.GL_VERSION));
         define(standardDefines, "MC_GLSL_VERSION", getGlVersion(GL20C.GL_SHADING_LANGUAGE_VERSION));
         define(standardDefines, getOsString());
@@ -40,6 +48,8 @@ public class StandardMacros {
         // "#ifdef IS_IRIS" is a stable, externally-consumed contract shader packs use to detect that they're
         // running under an Iris-compatible loader (vs. OptiFine or nothing) - not something to rebrand away.
         define(standardDefines, "IS_IRIS");
+        define(standardDefines, "IRIS_REQUIRES_SEPARATE_ENTITY_DRAWS");
+        define(standardDefines, "IRIS_HAS_TRANSLUCENCY_SORTING");
         define(standardDefines, "MAX_COLOR_BUFFERS", String.valueOf(AurumLimits.MAX_COLOR_BUFFERS));
 
         for (String glExtension : getGlExtensions()) {
@@ -64,6 +74,17 @@ public class StandardMacros {
         for (String aurumDefine : getAurumDefines()) {
             define(standardDefines, aurumDefine);
         }
+
+        BiomeUniforms.getBiomeMacros().forEach((name, id) -> define(standardDefines, "BIOME_" + name.toUpperCase(Locale.ROOT), String.valueOf(id)));
+
+        BiomeCategories[] categories = BiomeCategories.values();
+        for (int i = 0; i < categories.length; i++) {
+            define(standardDefines, "CAT_" + categories[i].name(), String.valueOf(i));
+        }
+
+        define(standardDefines, "PPT_NONE", "0");
+        define(standardDefines, "PPT_RAIN", "1");
+        define(standardDefines, "PPT_SNOW", "2");
 
         return ImmutableList.copyOf(standardDefines);
     }

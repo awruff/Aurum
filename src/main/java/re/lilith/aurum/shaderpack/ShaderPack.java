@@ -13,6 +13,10 @@ import re.lilith.aurum.Aurum;
 import re.lilith.aurum.config.FeatureFlags;
 import re.lilith.aurum.expression.CustomUniforms;
 import re.lilith.aurum.gl.buffer.ShaderStorageInfo;
+import re.lilith.aurum.gl.texture.InternalTextureFormat;
+import re.lilith.aurum.gl.texture.PixelFormat;
+import re.lilith.aurum.gl.texture.PixelType;
+import re.lilith.aurum.gl.texture.TextureType;
 import re.lilith.aurum.gl.image.ImageInformation;
 import re.lilith.aurum.shaderpack.include.AbsolutePackPath;
 import re.lilith.aurum.shaderpack.include.IncludeGraph;
@@ -111,7 +115,13 @@ public class ShaderPack {
         this.shaderPackOptions = new ShaderPackOptions(graph, changedConfigs);
         graph = this.shaderPackOptions.getIncludes();
 
-        Iterable<StringPair> finalEnvironmentDefines = environmentDefines;
+        List<StringPair> finalEnvironmentDefines = new ArrayList<>();
+        environmentDefines.forEach(finalEnvironmentDefines::add);
+        for (FeatureFlags flag : FeatureFlags.values()) {
+            if (flag.isUsable()) {
+                finalEnvironmentDefines.add(new StringPair("IRIS_FEATURE_" + flag.name(), ""));
+            }
+        }
         ShaderProperties shaderProperties = loadProperties(root, "shaders.properties")
                 .map(source -> new ShaderProperties(source, shaderPackOptions, finalEnvironmentDefines))
                 .orElseGet(ShaderProperties::empty);
@@ -122,6 +132,12 @@ public class ShaderPack {
 
         List<FeatureFlags> invalidFlagList = shaderProperties.getRequiredFeatureFlags().stream().filter(FeatureFlags::isInvalid).map(FeatureFlags::getValue).collect(Collectors.toList());
         List<String> invalidFeatureFlags = invalidFlagList.stream().map(FeatureFlags::getHumanReadableName).collect(Collectors.toList());
+
+        if (!invalidFeatureFlags.isEmpty()) {
+            throw new IllegalStateException("Shader pack requires unsupported features: "
+                    + shaderProperties.getRequiredFeatureFlags().stream().filter(FeatureFlags::isInvalid).collect(Collectors.joining(", "))
+                    + " (" + FeatureFlags.getInvalidStatus(invalidFlagList) + ")");
+        }
 
         List<String> optionalFeatureFlags = shaderProperties.getOptionalFeatureFlags().stream().filter(flag -> !FeatureFlags.isInvalid(flag)).collect(Collectors.toList());
 
@@ -267,10 +283,12 @@ public class ShaderPack {
         return Optional.of(fileContents);
     }
 
-    // TODO: Implement raw texture data types
     public CustomTextureData readTexture(Path root, String path) throws IOException {
         CustomTextureData customTextureData;
-        if (path.contains(":")) {
+        String[] rawParts = path.trim().split("\\s+");
+        if (rawParts.length > 1) {
+            customTextureData = readRawTexture(root, rawParts);
+        } else if (path.contains(":")) {
             String[] parts = path.split(":");
 
             if (parts.length > 2) {
@@ -290,33 +308,64 @@ public class ShaderPack {
                 path = path.substring(1);
             }
 
-            boolean blur = false;
-            boolean clamp = false;
-
-            String mcMetaPath = path + ".mcmeta";
-            Path mcMetaResolvedPath = root.resolve(mcMetaPath);
-
-            if (Files.exists(mcMetaResolvedPath)) {
-                try {
-                    JsonObject meta = loadMcMeta(mcMetaResolvedPath);
-                    if (meta.get("texture") != null) {
-                        if (meta.get("texture").getAsJsonObject().get("blur") != null) {
-                            blur = meta.get("texture").getAsJsonObject().get("blur").getAsBoolean();
-                        }
-                        if (meta.get("texture").getAsJsonObject().get("clamp") != null) {
-                            clamp = meta.get("texture").getAsJsonObject().get("clamp").getAsBoolean();
-                        }
-                    }
-                } catch (IOException e) {
-                    Aurum.LOGGER.error("Unable to read the custom texture mcmeta at " + mcMetaPath + ", ignoring: " + e);
-                }
-            }
-
             byte[] content = Files.readAllBytes(root.resolve(path));
 
-            customTextureData = new CustomTextureData.PngData(new TextureFilteringData(blur, clamp), content);
+            customTextureData = new CustomTextureData.PngData(readFilteringData(root, path), content);
         }
         return customTextureData;
+    }
+
+    /**
+     * Reads a raw texture directive: {@code <path> <type> <internalFormat> <sizes...> <pixelFormat> <pixelType>}, with
+     * one size for 1D textures, two for 2D and rectangle textures, and three for 3D textures.
+     */
+    private CustomTextureData readRawTexture(Path root, String[] parts) throws IOException {
+        if (parts.length < 6 || parts.length > 8) {
+            throw new IOException("Unexpected raw texture directive: " + String.join(" ", parts));
+        }
+
+        String path = parts[0].startsWith("/") ? parts[0].substring(1) : parts[0];
+        TextureType type = TextureType.fromString(parts[1].toUpperCase(Locale.ROOT))
+                .orElseThrow(() -> new IOException("Unknown texture type " + parts[1]));
+        InternalTextureFormat internalFormat = InternalTextureFormat.fromString(parts[2])
+                .orElseThrow(() -> new IOException("Unknown internal texture format " + parts[2]));
+        int sizes = parts.length - 5;
+        int sizeX = Integer.parseInt(parts[3]);
+        int sizeY = sizes > 1 ? Integer.parseInt(parts[4]) : 0;
+        int sizeZ = sizes > 2 ? Integer.parseInt(parts[5]) : 0;
+        PixelFormat pixelFormat = PixelFormat.fromString(parts[parts.length - 2])
+                .orElseThrow(() -> new IOException("Unknown pixel format " + parts[parts.length - 2]));
+        PixelType pixelType = PixelType.fromString(parts[parts.length - 1])
+                .orElseThrow(() -> new IOException("Unknown pixel type " + parts[parts.length - 1]));
+
+        return new CustomTextureData.RawData(Files.readAllBytes(root.resolve(path)), type, internalFormat, pixelFormat,
+                pixelType, sizeX, sizeY, sizeZ, readFilteringData(root, path));
+    }
+
+    private TextureFilteringData readFilteringData(Path root, String path) {
+        boolean blur = false;
+        boolean clamp = false;
+
+        String mcMetaPath = path + ".mcmeta";
+        Path mcMetaResolvedPath = root.resolve(mcMetaPath);
+
+        if (Files.exists(mcMetaResolvedPath)) {
+            try {
+                JsonObject meta = loadMcMeta(mcMetaResolvedPath);
+                if (meta.get("texture") != null) {
+                    if (meta.get("texture").getAsJsonObject().get("blur") != null) {
+                        blur = meta.get("texture").getAsJsonObject().get("blur").getAsBoolean();
+                    }
+                    if (meta.get("texture").getAsJsonObject().get("clamp") != null) {
+                        clamp = meta.get("texture").getAsJsonObject().get("clamp").getAsBoolean();
+                    }
+                }
+            } catch (IOException e) {
+                Aurum.LOGGER.error("Unable to read the custom texture mcmeta at " + mcMetaPath + ", ignoring: " + e);
+            }
+        }
+
+        return new TextureFilteringData(blur, clamp);
     }
 
     private JsonObject loadMcMeta(Path mcMetaPath) throws IOException, JsonParseException {

@@ -27,7 +27,9 @@ public final class IdMapUniforms {
         uniforms
                 .uniform1i(UniformUpdateFrequency.PER_FRAME, "heldItemId", mainHandSupplier::getIntID)
                 .uniform1i(PER_FRAME, "heldBlockLightValue", mainHandSupplier::getLightValue)
-                .uniformVanilla3f(PER_FRAME, "heldBlockLightColor", mainHandSupplier::getLightColor);
+                .uniformVanilla3f(PER_FRAME, "heldBlockLightColor", mainHandSupplier::getLightColor)
+                .uniform1i(UniformUpdateFrequency.ONCE, "heldItemId2", () -> -1)
+                .uniform1i(UniformUpdateFrequency.ONCE, "heldBlockLightValue2", () -> 0);
         //.uniformVanilla3f(PER_FRAME, "heldBlockLightColor2", offHandSupplier::getLightColor);
 
         uniforms.uniform1i("entityId", CapturedRenderingState.INSTANCE::getCurrentRenderedEntity,

@@ -1,9 +1,14 @@
 package re.lilith.aurum.pipeline.transform.impl;
 
+import org.antlr.v4.runtime.CommonToken;
+import org.antlr.v4.runtime.tree.ParseTree;
+import org.antlr.v4.runtime.tree.ParseTreeWalker;
+import org.antlr.v4.runtime.tree.TerminalNode;
 import org.taumc.glsl.ShaderPrinter;
 import org.taumc.glsl.Transformer;
 import org.taumc.glsl.grammar.GLSLLexer;
 import org.taumc.glsl.grammar.GLSLParser;
+import org.taumc.glsl.grammar.GLSLParserBaseListener;
 import re.lilith.aurum.Aurum;
 import re.lilith.aurum.pipeline.transform.patch.Parameters;
 import re.lilith.aurum.pipeline.transform.patch.Patch;
@@ -15,6 +20,19 @@ import java.util.HashMap;
 public class CompatibilityTransformer {
 
     private static final PatchShaderType[] pipeline = {PatchShaderType.VERTEX, PatchShaderType.GEOMETRY, PatchShaderType.FRAGMENT};
+
+    // Packs written for modern versions sometimes only declare a uniform behind an MC_VERSION check.
+    private static final String[] BUILTIN_UNIFORMS = {
+            "bool", "feetInWater firstPersonCamera hasCeiling hasSkylight hideGUI isRiding isRightHanded isSpectator vehicleInWater",
+            "float", "alphaTestRef aspectRatio blindness currentPlayerAir currentPlayerArmor currentPlayerHealth currentPlayerHunger darknessFactor darknessLightFactor eyeAltitude far fogDensity fogEnd fogStart frameTime frameTimeCounter lastFrameTime maxPlayerAir maxPlayerArmor maxPlayerHealth maxPlayerHunger near nightVision playerMood rainStrength rainfall screenBrightness shadowAngle sunAngle temperature thunderStrength viewHeight viewWidth wetness",
+            "int", "bedrockLevel biome biome_category biome_precipitation currentSelectedBlockId fogMode fogShape frameCounter heightLimit heldBlockLightValue heldBlockLightValue2 heldItemId heldItemId2 isEyeInWater logicalHeightLimit moonPhase renderStage seaLevel vehicleId worldDay worldTime",
+            "ivec2", "atlasSize currentYearTime eyeBrightness eyeBrightnessSmooth gtextureSize",
+            "ivec3", "cameraPositionInt currentDate currentTime previousCameraPositionInt",
+            "ivec4", "blendFunc",
+            "mat4", "gbufferModelView gbufferModelViewInverse gbufferPreviousModelView gbufferPreviousProjection gbufferProjection gbufferProjectionInverse shadowModelView shadowModelViewInverse shadowProjection shadowProjectionInverse",
+            "vec3", "cameraPosition cameraPositionFract currentSelectedBlockPos eyePosition fogColor heldBlockLightColor moonPosition playerBodyVector playerLookVector previousCameraPosition previousCameraPositionFract relativeEyePosition shadowLightPosition skyColor sunPosition upPosition",
+            "vec4", "entityColor lightningBoltPosition"
+    };
 
     public static void transformEach(Transformer transformer, Parameters parameters) {
         if (parameters.type == PatchShaderType.VERTEX) {
@@ -35,8 +53,37 @@ public class CompatibilityTransformer {
         renameLegacyTextureFunctions(transformer);
         injectInverseIfMissing(transformer, parameters.version);
         injectFogCompatIfNeeded(transformer);
+        injectImplicitIdUniforms(transformer);
 
+        transformer.removeUnusedFunctions();
         transformer.removeConstAssignment();
+        transformer.rewriteStructArrays();
+        upgradeStorageQualifiers(transformer, parameters.type);
+    }
+
+    /**
+     * Every shader is compiled as at least GLSL 130, where Mesa rejects qualifiers such as {@code flat} on the
+     * deprecated {@code attribute}/{@code varying} storage, so those become {@code in}/{@code out}.
+     */
+    private static void upgradeStorageQualifiers(Transformer transformer, PatchShaderType type) {
+        for (TerminalNode node : transformer.collectStorage()) {
+            if (!(node.getSymbol() instanceof CommonToken token)) {
+                continue;
+            }
+
+            if (token.getType() == GLSLLexer.ATTRIBUTE && type == PatchShaderType.VERTEX) {
+                token.setType(GLSLLexer.IN);
+                token.setText("in");
+            } else if (token.getType() == GLSLLexer.VARYING) {
+                if (type == PatchShaderType.VERTEX) {
+                    token.setType(GLSLLexer.OUT);
+                    token.setText("out");
+                } else if (type == PatchShaderType.FRAGMENT) {
+                    token.setType(GLSLLexer.IN);
+                    token.setText("in");
+                }
+            }
+        }
     }
 
     public static void transformCompute(Transformer transformer, int version) {
@@ -44,7 +91,28 @@ public class CompatibilityTransformer {
         injectInverseIfMissing(transformer, version);
         injectFogCompatIfNeeded(transformer);
 
+        transformer.removeUnusedFunctions();
         transformer.removeConstAssignment();
+        transformer.rewriteStructArrays();
+    }
+
+    /**
+     * Iris substitutes these IDs wherever they are referenced, so packs may use them without declaring them.
+     */
+    private static void injectImplicitIdUniforms(Transformer transformer) {
+        for (String name : new String[]{"entityId", "blockEntityId", "currentRenderedItemId"}) {
+            if (transformer.containsCall(name) && !transformer.hasVariable(name)) {
+                transformer.injectVariable("uniform int " + name + ";");
+            }
+        }
+
+        for (int i = 0; i < BUILTIN_UNIFORMS.length; i += 2) {
+            for (String name : BUILTIN_UNIFORMS[i + 1].split(" ")) {
+                if (transformer.containsCall(name) && !transformer.hasVariable(name)) {
+                    transformer.injectVariable("uniform " + BUILTIN_UNIFORMS[i] + " " + name + ";");
+                }
+            }
+        }
     }
 
     private static void injectFogCompatIfNeeded(Transformer transformer) {
@@ -122,7 +190,7 @@ public class CompatibilityTransformer {
 
     private static void renameLegacyTextureFunctions(Transformer transformer) {
         if (transformer.hasVariable("texture")) {
-            transformer.rename("texture", "gtexture");
+            renameSamplerKeepingCalls(transformer, "texture", "gtexture");
         }
         if (transformer.hasVariable("gcolor")) {
             transformer.rename("gcolor", "gtexture");
@@ -143,6 +211,33 @@ public class CompatibilityTransformer {
 
         transformer.renameAndWrapShadow("shadow2D", "texture");
         transformer.renameAndWrapShadow("shadow2DLod", "textureLod");
+    }
+
+    /**
+     * Renames a sampler that shares its name with a built-in function, such as {@code texture(texture, uv)}. The
+     * library's rename helpers either touch every occurrence or every occurrence inside a call, so the callee is
+     * restored by hand afterwards.
+     */
+    private static void renameSamplerKeepingCalls(Transformer transformer, String from, String to) {
+        transformer.rename(from, to);
+        transformer.mutateTree(tree -> ParseTreeWalker.DEFAULT.walk(new GLSLParserBaseListener() {
+            @Override
+            public void visitTerminal(TerminalNode node) {
+                if (node.getText().equals(to) && isCallee(node) && node.getSymbol() instanceof CommonToken token) {
+                    token.setText(from);
+                }
+            }
+        }, tree));
+    }
+
+    private static boolean isCallee(TerminalNode node) {
+        if (!(node.getParent() instanceof GLSLParser.Variable_identifierContext identifier)) {
+            return false;
+        }
+
+        ParseTree postfix = identifier.getParent() == null ? null : identifier.getParent().getParent();
+        return postfix != null && postfix.getParent() instanceof GLSLParser.Postfix_expressionContext call
+                && call.getChild(0) == postfix && call.function_call_parameters() != null;
     }
 
     private static void injectAlphaTestDiscard(Transformer transformer) {

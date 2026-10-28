@@ -10,10 +10,7 @@ public class AttributeTransformer {
             AttributeParameters parameters,
             boolean isCoreProfile) {
         if (isCoreProfile) {
-            if (parameters.type == PatchShaderType.VERTEX) {
-                throw new IllegalStateException("Vertex shaders must be in the compatibility profile to run properly!");
-            }
-            return;
+            mapCoreProfileInputs(transformer);
         }
 
         // Some shader packs don't scroll the enchantment glint texture through the texture matrix themselves.
@@ -127,6 +124,33 @@ public class AttributeTransformer {
             if (parameters.hasGeometry) {
                 transformer.rename("entityColor", "entityColorGS");
             }
+        }
+    }
+
+    /**
+     * Maps OptiFine's core-profile inputs onto the fixed-function built-ins that 1.8.9 actually feeds, since the shader
+     * is compiled against the compatibility profile.
+     */
+    private static void mapCoreProfileInputs(Transformer transformer) {
+        String[][] replacements = {
+                {"vaPosition", "gl_Vertex.xyz"},
+                {"vaColor", "gl_Color"},
+                {"vaNormal", "gl_Normal"},
+                {"vaUV0", "gl_MultiTexCoord0.xy"},
+                {"vaUV1", "ivec2(0, 10)"},
+                {"vaUV2", "ivec2(gl_MultiTexCoord1.xy)"},
+                {"modelViewMatrix", "gl_ModelViewMatrix"},
+                {"projectionMatrix", "gl_ProjectionMatrix"},
+                {"textureMatrix", "gl_TextureMatrix[0]"},
+                {"normalMatrix", "gl_NormalMatrix"},
+                {"chunkOffset", "vec3(0.0)"}
+        };
+
+        for (String[] replacement : replacements) {
+            if (transformer.hasVariable(replacement[0])) {
+                transformer.removeVariable(replacement[0]);
+            }
+            transformer.replaceExpression(replacement[0], replacement[1], GLSLParser::postfix_expression);
         }
     }
 }

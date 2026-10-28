@@ -38,6 +38,9 @@ public final class PipelineTeardown {
         // Destroy the composite rendering pipeline
         //
         // This destroys all the loaded composite programs as well.
+        pipeline.setupRenderer.destroy();
+        pipeline.beginRenderer.destroy();
+        pipeline.prepareRenderer.destroy();
         pipeline.compositeRenderer.destroy();
         pipeline.deferredRenderer.destroy();
         pipeline.finalPassRenderer.destroy();

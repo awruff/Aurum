@@ -420,7 +420,11 @@ public class AurumRenderSystem {
             } else {
                 ARBDirectStateAccess.glBindTextureUnit(unit, texture);
                 GlStateManager.activeTexture(GL13.GL_TEXTURE0 + unit);
-                GlStateManager.bindTexture(texture);
+                // GlStateManager only tracks GL_TEXTURE_2D; feeding it a 3D or rectangle texture is a GL error and
+                // leaves its cached binding wrong.
+                if (getTextureTarget(texture) == GL11C.GL_TEXTURE_2D) {
+                    GlStateManager.bindTexture(texture);
+                }
             }
         }
 

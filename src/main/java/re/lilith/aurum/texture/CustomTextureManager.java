@@ -1,5 +1,12 @@
 package re.lilith.aurum.texture;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
+import org.lwjgl.opengl.GL11C;
+import org.lwjgl.opengl.GL12C;
+import org.lwjgl.system.MemoryUtil;
+import re.lilith.aurum.gl.AurumRenderSystem;
+import java.nio.ByteBuffer;
 import com.mojang.blaze3d.platform.GlStateManager;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMaps;
@@ -42,6 +49,7 @@ public class CustomTextureManager {
      * Make sure any textures added to this list call releaseId from the close method.
      */
     private final List<AbstractTexture> ownedTextures = new ArrayList<>();
+    private final IntList ownedRawTextures = new IntArrayList();
 
     public CustomTextureManager(PackDirectives packDirectives,
                                 EnumMap<TextureStage, Object2ObjectMap<String, CustomTextureData>> customTextureDataMap,
@@ -153,6 +161,12 @@ public class CustomTextureManager {
                     };
                 }
             }
+            case CustomTextureData.RawData rawData -> {
+                int texture = createRawTexture(rawData);
+                ownedRawTextures.add(texture);
+
+                return () -> texture;
+            }
             case null, default ->
                     throw new IllegalArgumentException("Unable to handle custom texture data " + textureData);
         }
@@ -172,5 +186,44 @@ public class CustomTextureManager {
 
     public void destroy() {
         ownedTextures.forEach(AbstractTexture::clearGlId);
+        ownedRawTextures.forEach(texture -> {
+            AurumRenderSystem.forgetTextureTarget(texture);
+            GlStateManager.deleteTexture(texture);
+        });
+    }
+
+    private static int createRawTexture(CustomTextureData.RawData data) {
+        int target = data.getType().getGlType();
+        int texture = AurumRenderSystem.createTexture(target);
+
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_ALIGNMENT, 1);
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_ROW_LENGTH, 0);
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_SKIP_ROWS, 0);
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_SKIP_PIXELS, 0);
+
+        ByteBuffer pixels = MemoryUtil.memAlloc(data.getContent().length);
+        try {
+            pixels.put(data.getContent()).flip();
+            data.getType().apply(texture, data.getSizeX(), data.getSizeY(), data.getSizeZ(),
+                    data.getInternalFormat().getGlFormat(), data.getPixelFormat().getGlFormat(), data.getPixelType().getGlFormat(), pixels);
+        } finally {
+            MemoryUtil.memFree(pixels);
+            GL11C.glPixelStorei(GL11C.GL_UNPACK_ALIGNMENT, 4);
+        }
+
+        int filter = data.getFilteringData().shouldBlur() ? GL11C.GL_LINEAR : GL11C.GL_NEAREST;
+        int wrap = data.getFilteringData().shouldClamp() ? GL12C.GL_CLAMP_TO_EDGE : GL11C.GL_REPEAT;
+        AurumRenderSystem.texParameteri(texture, target, GL11C.GL_TEXTURE_MIN_FILTER, filter);
+        AurumRenderSystem.texParameteri(texture, target, GL11C.GL_TEXTURE_MAG_FILTER, filter);
+        AurumRenderSystem.texParameteri(texture, target, GL11C.GL_TEXTURE_WRAP_S, wrap);
+        if (data.getSizeY() > 0) {
+            AurumRenderSystem.texParameteri(texture, target, GL11C.GL_TEXTURE_WRAP_T, wrap);
+        }
+        if (data.getSizeZ() > 0) {
+            AurumRenderSystem.texParameteri(texture, target, GL12C.GL_TEXTURE_WRAP_R, wrap);
+        }
+        AurumRenderSystem.texParameteri(texture, target, GL12C.GL_TEXTURE_MAX_LEVEL, 0);
+
+        return texture;
     }
 }

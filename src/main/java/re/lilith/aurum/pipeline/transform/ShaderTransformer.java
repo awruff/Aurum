@@ -129,7 +129,8 @@ public class ShaderTransformer {
             if (!matcher.find()) {
                 throw new IllegalArgumentException("No #version directive found in source code! See debugging.md for more information.");
             }
-            int version = Integer.parseInt(matcher.group(1));
+            boolean wantsProfile = matcher.group(2) != null || input.contains("GL_ARB_shader_storage_buffer_object");
+            int version = effectiveVersion(Integer.parseInt(matcher.group(1)), wantsProfile);
             boolean isCoreProfile = "core".equals(matcher.group(2));
             parameters.version = version;
 
@@ -160,19 +161,11 @@ public class ShaderTransformer {
                 header = header + "\n#extension GL_ARB_shader_texture_lod : require\n";
             }
 
-            if (version < 130) {
-                header = versionPattern.matcher(header).replaceFirst("#version 130");
+            if (header.contains("GL_ARB_shader_storage_buffer_object") && !header.contains("GL_ARB_shading_language_420pack")) {
+                header = header + "\n#extension GL_ARB_shading_language_420pack : enable\n";
             }
 
-            if (header.contains("GL_ARB_shader_storage_buffer_object")) {
-                if (!header.contains("GL_ARB_shading_language_420pack")) {
-                    header = header + "\n#extension GL_ARB_shading_language_420pack : enable\n";
-                }
-
-                if (version < 150) {
-                    header = versionPattern.matcher(header).replaceFirst("#version 150 compatibility");
-                }
-            }
+            header = versionPattern.matcher(header).replaceFirst(compatibilityVersion(version));
 
             transformers.put(type, transformer);
             headers.put(type, header);
@@ -192,6 +185,19 @@ public class ShaderTransformer {
         }
 
         return result;
+    }
+
+    /**
+     * Shaders always compile against the compatibility profile because 1.8.9 feeds them through fixed-function state.
+     * Mesa treats a bare {@code #version 150} or newer as core and rejects a profile below 150, so 150 and up get the
+     * compatibility profile, and a shader below 150 that names a profile is raised to 150.
+     */
+    private static int effectiveVersion(int version, boolean wantsProfile) {
+        return Math.max(version, wantsProfile ? 150 : 130);
+    }
+
+    private static String compatibilityVersion(int version) {
+        return version >= 150 ? "#version " + version + " compatibility" : "#version " + version;
     }
 
     public static Map<PatchShaderType, String> patchAttributes(String vertex, String geometry, String fragment, InputAvailability inputs, boolean scrollGlint) {
@@ -231,7 +237,8 @@ public class ShaderTransformer {
         if (!matcher.find()) {
             throw new IllegalArgumentException("No #version directive found in source code! See debugging.md for more information.");
         }
-        int version = Integer.parseInt(matcher.group(1));
+        boolean wantsProfile = matcher.group(2) != null || source.contains("GL_ARB_shader_storage_buffer_object");
+        int version = effectiveVersion(Integer.parseInt(matcher.group(1)), wantsProfile);
 
         String renamedInput = reservedSamplePattern.matcher(source).replaceAll(RENAMED_SAMPLE);
 
@@ -244,19 +251,11 @@ public class ShaderTransformer {
 
         String header = ShaderPrinter.getFormattedShader(parsed.pre());
 
-        if (version < 130) {
-            header = versionPattern.matcher(header).replaceFirst("#version 130");
+        if (header.contains("GL_ARB_shader_storage_buffer_object") && !header.contains("GL_ARB_shading_language_420pack")) {
+            header = header + "\n#extension GL_ARB_shading_language_420pack : enable\n";
         }
 
-        if (header.contains("GL_ARB_shader_storage_buffer_object")) {
-            if (!header.contains("GL_ARB_shading_language_420pack")) {
-                header = header + "\n#extension GL_ARB_shading_language_420pack : enable\n";
-            }
-
-            if (version < 150) {
-                header = versionPattern.matcher(header).replaceFirst("#version 150 compatibility");
-            }
-        }
+        header = versionPattern.matcher(header).replaceFirst(compatibilityVersion(version));
 
         String[] bodyHolder = new String[1];
         transformer.mutateTree(tree -> bodyHolder[0] = ShaderPrinter.getFormattedShader(tree));

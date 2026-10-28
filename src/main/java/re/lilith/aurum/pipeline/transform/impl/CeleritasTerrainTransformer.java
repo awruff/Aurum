@@ -83,7 +83,11 @@ public class CeleritasTerrainTransformer {
         transformer.injectVariable("uniform mat4 u_ModelViewProjectionMatrix;");
         transformer.injectVariable("uniform mat4 aurum_NormalMatrix;");
         transformer.injectVariable("uniform mat4 aurum_LightmapTextureMatrix;");
+        transformer.injectVariable("uniform mat4 aurum_ProjectionMatrix;");
+        transformer.replaceExpression("gl_ModelViewMatrixInverse", "inverse(aurum_ModelViewMatrix)", GLSLParser::postfix_expression);
+        transformer.replaceExpression("gl_ProjectionMatrixInverse", "inverse(aurum_ProjectionMatrix)", GLSLParser::postfix_expression);
         transformer.rename("gl_ModelViewMatrix", "aurum_ModelViewMatrix");
+        transformer.rename("gl_ProjectionMatrix", "aurum_ProjectionMatrix");
         transformer.rename("gl_ModelViewProjectionMatrix", "u_ModelViewProjectionMatrix");
         transformer.replaceExpression("gl_NormalMatrix", "mat3(aurum_NormalMatrix)", GLSLParser::postfix_expression);
 

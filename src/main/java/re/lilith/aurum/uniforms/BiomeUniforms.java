@@ -10,7 +10,6 @@ import re.lilith.aurum.gl.uniform.holder.UniformHolder;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static re.lilith.aurum.gl.uniform.UniformUpdateFrequency.ONCE;
 import static re.lilith.aurum.gl.uniform.UniformUpdateFrequency.PER_TICK;
 
 public class BiomeUniforms {
@@ -26,17 +25,52 @@ public class BiomeUniforms {
                 .uniform1f(PER_TICK, "rainfall", BiomeUniforms::getBiomeRainfall)
                 .uniform1f(PER_TICK, "temperature", BiomeUniforms::getBiomeTemperature);
 
-        addModernBiomeConstants(uniforms);
     }
 
-    private static void addModernBiomeConstants(UniformHolder uniforms) {
-        uniforms.uniform1i(ONCE, "BIOME_NETHER_WASTES", () -> -1000)
-                .uniform1i(ONCE, "BIOME_SOUL_SAND_VALLEY", () -> -1001)
-                .uniform1i(ONCE, "BIOME_CRIMSON_FOREST", () -> -1002)
-                .uniform1i(ONCE, "BIOME_WARPED_FOREST", () -> -1003)
-                .uniform1i(ONCE, "BIOME_BASALT_DELTAS", () -> -1004)
-                .uniform1i(ONCE, "BIOME_LUSH_CAVES", () -> -1005)
-                .uniform1i(ONCE, "BIOME_PALE_GARDEN", () -> -1006);
+    /**
+     * Shader packs compare {@code biome} against {@code BIOME_*} macros named after modern biome registry ids. Names
+     * that have a 1.8.9 counterpart map to its numeric id; biomes that don't exist on 1.8.9 get distinct negative ids
+     * so comparisons against them compile but never match.
+     */
+    public static Map<String, Integer> getBiomeMacros() {
+        Map<String, Integer> ids = new LinkedHashMap<>();
+        Object[] known = {
+                "ocean", 0, "plains", 1, "desert", 2, "windswept_hills", 3, "mountains", 3, "extreme_hills", 3,
+                "forest", 4, "taiga", 5, "swamp", 6, "river", 7, "nether_wastes", 8, "nether", 8, "the_end", 9,
+                "frozen_ocean", 10, "frozen_river", 11, "snowy_plains", 12, "snowy_tundra", 12, "snowy_mountains", 13,
+                "mushroom_fields", 14, "mushroom_field_shore", 15, "beach", 16, "desert_hills", 17, "wooded_hills", 18,
+                "taiga_hills", 19, "mountain_edge", 20, "jungle", 21, "jungle_hills", 22, "sparse_jungle", 23,
+                "jungle_edge", 23, "deep_ocean", 24, "stony_shore", 25, "stone_shore", 25, "snowy_beach", 26,
+                "birch_forest", 27, "birch_forest_hills", 28, "dark_forest", 29, "snowy_taiga", 30,
+                "snowy_taiga_hills", 31, "old_growth_pine_taiga", 32, "giant_tree_taiga", 32,
+                "giant_tree_taiga_hills", 33, "windswept_forest", 34, "wooded_mountains", 34, "savanna", 35,
+                "savanna_plateau", 36, "badlands", 37, "wooded_badlands", 38, "wooded_badlands_plateau", 38,
+                "badlands_plateau", 39, "sunflower_plains", 129, "desert_lakes", 130, "windswept_gravelly_hills", 131,
+                "gravelly_mountains", 131, "flower_forest", 132, "taiga_mountains", 133, "swamp_hills", 134,
+                "ice_spikes", 140, "modified_jungle", 149, "modified_jungle_edge", 151, "old_growth_birch_forest", 155,
+                "tall_birch_forest", 155, "tall_birch_hills", 156, "dark_forest_hills", 157,
+                "snowy_taiga_mountains", 158, "old_growth_spruce_taiga", 160, "giant_spruce_taiga", 160,
+                "giant_spruce_taiga_hills", 161, "modified_gravelly_mountains", 162, "windswept_savanna", 163,
+                "shattered_savanna", 163, "shattered_savanna_plateau", 164, "eroded_badlands", 165,
+                "modified_wooded_badlands_plateau", 166, "modified_badlands_plateau", 167
+        };
+        for (int i = 0; i < known.length; i += 2) {
+            ids.put((String) known[i], (Integer) known[i + 1]);
+        }
+
+        String[] modernOnly = {
+                "the_void", "small_end_islands", "end_midlands", "end_highlands", "end_barrens", "warm_ocean",
+                "lukewarm_ocean", "cold_ocean", "deep_warm_ocean", "deep_lukewarm_ocean", "deep_cold_ocean",
+                "deep_frozen_ocean", "bamboo_jungle", "modified_bamboo_jungle", "soul_sand_valley", "crimson_forest",
+                "warped_forest", "basalt_deltas", "dripstone_caves", "lush_caves", "deep_dark", "meadow", "grove",
+                "snowy_slopes", "frozen_peaks", "jagged_peaks", "stony_peaks", "mangrove_swamp", "cherry_grove",
+                "pale_garden", "windswept_savanna_plateau"
+        };
+        for (int i = 0; i < modernOnly.length; i++) {
+            ids.putIfAbsent(modernOnly[i], -1000 - i);
+        }
+
+        return ids;
     }
 
     private static Biome getCachedBiome() {

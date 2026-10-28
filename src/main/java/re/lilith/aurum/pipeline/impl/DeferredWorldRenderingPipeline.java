@@ -1,6 +1,7 @@
 package re.lilith.aurum.pipeline.impl;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.mojang.blaze3d.platform.GlStateManager;
 import net.minecraft.client.MinecraftClient;
@@ -95,7 +96,10 @@ public class DeferredWorldRenderingPipeline implements WorldRenderingPipeline, R
     private ImmutableList<ClearPass> shadowClearPasses;
     private ImmutableList<ClearPass> shadowClearPassesFull;
 
-    private final CompositeRenderer prepareRenderer;
+    public final CompositeRenderer setupRenderer;
+    private boolean setupPending = true;
+    public final CompositeRenderer beginRenderer;
+    public final CompositeRenderer prepareRenderer;
 
     @Nullable
     public final ShadowRenderer shadowRenderer;
@@ -223,6 +227,8 @@ public class DeferredWorldRenderingPipeline implements WorldRenderingPipeline, R
         PatchedShaderPrinter.resetPrintState();
 
         CompositeStages stages = buildCompositeStages(programs, flipper);
+        this.setupRenderer = stages.setup();
+        this.beginRenderer = stages.begin();
         this.prepareRenderer = stages.prepare();
         this.flippedAfterPrepare = stages.flippedAfterPrepare();
         this.deferredRenderer = stages.deferred();
@@ -299,12 +305,21 @@ public class DeferredWorldRenderingPipeline implements WorldRenderingPipeline, R
         this.celeritasTerrainPipeline = new CeleritasTerrainPipelineFactory(this).create(programs);
     }
 
-    private record CompositeStages(CompositeRenderer prepare, ImmutableSet<Integer> flippedAfterPrepare,
+    private record CompositeStages(CompositeRenderer setup, CompositeRenderer begin, CompositeRenderer prepare, ImmutableSet<Integer> flippedAfterPrepare,
                                    CompositeRenderer deferred, ImmutableSet<Integer> flippedAfterTranslucent,
                                    CompositeRenderer composite, FinalPassRenderer finalPass) {
     }
 
     private CompositeStages buildCompositeStages(ProgramSet programs, BufferFlipper flipper) {
+        CompositeRenderer setup = new CompositeRenderer(new ProgramSource[programs.getSetup().length], programs.getSetup(), renderTargets,
+                customTextureManager.getNoiseTexture(), updateNotifier, centerDepthSampler, flipper, shadowTargetsSupplier,
+                customTextureManager.getCustomTextureIdMap(TextureStage.SETUP), ImmutableMap.of(), customUniforms, customImages);
+
+        CompositeRenderer begin = new CompositeRenderer(programs.getBegin(), programs.getBeginCompute(), renderTargets,
+                customTextureManager.getNoiseTexture(), updateNotifier, centerDepthSampler, flipper, shadowTargetsSupplier,
+                customTextureManager.getCustomTextureIdMap(TextureStage.BEGIN),
+                programs.getPackDirectives().getExplicitFlips("begin_pre"), customUniforms, customImages);
+
         CompositeRenderer prepare = new CompositeRenderer(programs.getPrepare(), programs.getPrepareCompute(), renderTargets,
                 customTextureManager.getNoiseTexture(), updateNotifier, centerDepthSampler, flipper, shadowTargetsSupplier,
                 customTextureManager.getCustomTextureIdMap(TextureStage.PREPARE),
@@ -329,7 +344,7 @@ public class DeferredWorldRenderingPipeline implements WorldRenderingPipeline, R
                 customTextureManager.getCustomTextureIdMap(TextureStage.COMPOSITE_AND_FINAL),
                 composite.getFlippedAtLeastOnceFinal(), customUniforms, customImages);
 
-        return new CompositeStages(prepare, flippedAfterPrepare, deferred, flippedAfterTranslucent, composite, finalPass);
+        return new CompositeStages(setup, begin, prepare, flippedAfterPrepare, deferred, flippedAfterTranslucent, composite, finalPass);
     }
 
     private record ShadowRenderingResult(@Nullable ShadowCompositeRenderer compositeRenderer,
@@ -578,7 +593,7 @@ public class DeferredWorldRenderingPipeline implements WorldRenderingPipeline, R
         }
 
         if (changed) {
-
+            beginRenderer.recalculateSizes();
             prepareRenderer.recalculateSizes();
             deferredRenderer.recalculateSizes();
             compositeRenderer.recalculateSizes();
@@ -616,6 +631,14 @@ public class DeferredWorldRenderingPipeline implements WorldRenderingPipeline, R
 
         // Reset framebuffer and viewport
         MinecraftClient.getInstance().getFramebuffer().bind(true);
+
+        isRenderingFullScreenPass = true;
+        if (changed || setupPending) {
+            setupPending = false;
+            setupRenderer.renderAll();
+        }
+        beginRenderer.renderAll();
+        isRenderingFullScreenPass = false;
     }
 
     @Override

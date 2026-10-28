@@ -10,9 +10,11 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class PropertiesPreprocessor {
+    private static final String RAW_LINE_MARKER = "AURUM_RAWLINE_";
+
     // Derived from ShaderProcessor.glslPreprocessSource, which is derived from GlShader from Canvas, licenced under LGPL
     public static String preprocessSource(String source, ShaderPackOptions shaderPackOptions, Iterable<StringPair> environmentDefines) {
-        if (source.contains(PropertyCollectingListener.PROPERTY_MARKER)) {
+        if (source.contains(PropertyCollectingListener.PROPERTY_MARKER) || source.contains("AURUM_PASSTHROUGHBACKSLASH") || source.contains(RAW_LINE_MARKER)) {
             throw new RuntimeException("Some shader author is trying to exploit internal Aurum implementation details, stop!");
         }
 
@@ -25,7 +27,11 @@ public class PropertiesPreprocessor {
             }
 
             for (StringPair envDefine : environmentDefines) {
-                pp.addMacro(envDefine.getKey(), envDefine.getValue());
+                if (envDefine.getValue().isEmpty()) {
+                    pp.addMacro(envDefine.getKey());
+                } else {
+                    pp.addMacro(envDefine.getKey(), envDefine.getValue());
+                }
             }
 
             stringValues.forEach((name, value) -> {
@@ -52,19 +58,28 @@ public class PropertiesPreprocessor {
         // Not super efficient, but this removes trailing whitespace on lines, fixing an issue with whitespace after
         // line continuations (see PreprocessorTest#testWeirdPropertiesLineContinuation)
         // Required for Voyager Shader
-        source = Arrays.stream(source.split("\\R")).map(String::trim)
+        List<String> rawLines = new ArrayList<>();
+        source = Arrays.stream(source.split("\\R")).map(String::trim).filter(s -> !s.isBlank())
                 .map(line -> {
-                    if (line.startsWith("#")) {
-                        // In PropertyCollectingListener we suppress "unknown preprocessor directive errors" and
-                        // assume the line to be a comment, since in .properties files `#` also functions as a comment
-                        // marker.
-                        return line;
-                    } else {
-                        // This is a hack to ensure that non-macro lines don't have any preprocessing applied...
-                        // In properties files, we don't substitute #define values except on macro lines.
-                        return "#warning AURUM_PASSTHROUGH " + line;
+                    // Feature flag names are plain words that packs also use as macro names (e.g. an SSBO include
+                    // guard), so these lines must not be macro-expanded.
+                    if (line.startsWith("iris.features.")) {
+                        rawLines.add(line);
+                        return RAW_LINE_MARKER + (rawLines.size() - 1);
                     }
+
+                    if (line.startsWith("#")) {
+                        for (PreprocessorCommand command : PreprocessorCommand.values()) {
+                            if (line.startsWith("#" + command.name().replace("PP_", "").toLowerCase(Locale.ROOT))) {
+                                return line;
+                            }
+                        }
+                        return "";
+                    }
+                    return line.replace("#", "");
                 }).collect(Collectors.joining("\n")) + "\n";
+        // Hides backslashes from JCPP so that line continuations in property values survive preprocessing.
+        source = source.replace("\\", "AURUM_PASSTHROUGHBACKSLASH");
 
         preprocessor.addInput(new StringLexerSource(source, true));
         preprocessor.addFeature(Feature.KEEPCOMMENTS);
@@ -74,7 +89,7 @@ public class PropertiesPreprocessor {
         try {
             for (; ; ) {
                 final Token tok = preprocessor.token();
-                if (tok.getType() == Token.EOF) break;
+                if (tok == null || tok.getType() == Token.EOF) break;
                 builder.append(tok.getText());
             }
         } catch (final Exception e) {
@@ -83,7 +98,13 @@ public class PropertiesPreprocessor {
 
         source = builder.toString();
 
-        return listener.collectLines() + source;
+        source = (listener.collectLines() + source).replace("AURUM_PASSTHROUGHBACKSLASH", "\\");
+
+        for (int i = rawLines.size() - 1; i >= 0; i--) {
+            source = source.replace(RAW_LINE_MARKER + i, rawLines.get(i));
+        }
+
+        return source;
     }
 
     private static List<String> getBooleanValues(ShaderPackOptions shaderPackOptions) {

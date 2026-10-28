@@ -152,9 +152,9 @@ public class ShaderProperties {
             handleBooleanDirective(key, value, "frustum.culling", bool -> frustumCulling = bool);
 
             if ("shadow.culling".equals(key)) {
-                if ("false".equals(value)) {
+                if ("false".equals(value) || "0".equals(value)) {
                     shadowCulling = ShadowCullState.DISTANCE;
-                } else if ("true".equals(value)) {
+                } else if ("true".equals(value) || "1".equals(value)) {
                     shadowCulling = ShadowCullState.ADVANCED;
                 } else if ("reversed".equals(value) || "safe_zone".equals(value)) {
                     shadowCulling = ShadowCullState.SAFE_ZONE;
@@ -197,8 +197,9 @@ public class ShaderProperties {
             handlePassDirective("scale.", key, value, pass -> {
                 float scale;
 
+                // ponytail: viewport offsets ("scale x y") are dropped; plumb them into the pass viewport when a pack needs them
                 try {
-                    scale = Float.parseFloat(value);
+                    scale = Float.parseFloat(value.trim().split("\\s+")[0]);
                 } catch (NumberFormatException e) {
                     Aurum.LOGGER.error("Unable to parse scale directive for " + pass + ": " + value, e);
                     return;
@@ -223,7 +224,7 @@ public class ShaderProperties {
             handlePassDirective("image.", key, value, imageName -> parseCustomImage(imageName, value));
 
             handlePassDirective("alphaTest.", key, value, pass -> {
-                if ("off".equals(value)) {
+                if ("off".equals(value) || "false".equals(value)) {
                     alphaTestOverrides.put(pass, AlphaTestOverride.OFF);
                     return;
                 }
@@ -329,14 +330,10 @@ public class ShaderProperties {
                 }
             });
 
-            handleTwoArgDirective("texture.", key, value, (stageName, samplerName) -> {
-                String[] parts = value.split(" ");
-
-                // TODO: Support raw textures
-                if (parts.length > 1) {
-                    Aurum.LOGGER.warn("Custom texture directive for stage " + stageName + ", sampler " + samplerName + " contains more parts than we expected: " + value);
-                    return;
-                }
+            handleTwoArgDirective("texture.", key, value, (stageName, rawSamplerName) -> {
+                String samplerName = rawSamplerName;
+                // Iris accepts a suffix such as "colortex6.1" so that one sampler can be listed more than once.
+                samplerName = samplerName.split("\\.")[0];
 
                 Optional<TextureStage> optionalTextureStage = TextureStage.parse(stageName);
 
@@ -392,9 +389,9 @@ public class ShaderProperties {
     }
 
     private static void handleBooleanValue(String key, String value, BooleanConsumer handler) {
-        if ("true".equals(value)) {
+        if ("true".equals(value) || "1".equals(value)) {
             handler.accept(true);
-        } else if ("false".equals(value)) {
+        } else if ("false".equals(value) || "0".equals(value)) {
             handler.accept(false);
         } else {
             Aurum.LOGGER.warn("Unexpected value for boolean key " + key + " in shaders.properties: got " + value + ", but expected either true or false");
@@ -406,9 +403,9 @@ public class ShaderProperties {
             return;
         }
 
-        if ("true".equals(value)) {
+        if ("true".equals(value) || "1".equals(value)) {
             handler.accept(OptionalBoolean.TRUE);
-        } else if ("false".equals(value)) {
+        } else if ("false".equals(value) || "0".equals(value)) {
             handler.accept(OptionalBoolean.FALSE);
         } else {
             Aurum.LOGGER.warn("Unexpected value for boolean key " + key + " in shaders.properties: got " + value + ", but expected either true or false");

@@ -19,6 +19,9 @@ public class JcppProcessor {
         // lenient drivers that allow #extension directives to be placed anywhere to work on strict drivers like Mesa
         // that require #extension directives to occur at the top.
 
+        // Some packs, such as Chocapic High Performance, contain stray NUL characters that trip up JCPP.
+        source = source.replace("\u0000", "");
+
         source = source.replace("#version", GlslCollectingListener.VERSION_MARKER);
         source = source.replace("#extension", GlslCollectingListener.EXTENSION_MARKER);
 
@@ -46,7 +49,7 @@ public class JcppProcessor {
         try {
             for (; ; ) {
                 final Token tok = pp.token();
-                if (tok.getType() == Token.EOF) break;
+                if (tok == null || tok.getType() == Token.EOF) break;
                 builder.append(tok.getText());
             }
         } catch (final Exception e) {

@@ -17,6 +17,9 @@ public class ProgramSet {
 
     private final ProgramSource[] shadowcomp;
     private final ComputeSource[][] shadowCompCompute;
+    private final ComputeSource[][] setup;
+    private final ProgramSource[] begin;
+    private final ComputeSource[][] beginCompute;
     private final ProgramSource[] prepare;
     private final ComputeSource[][] prepareCompute;
 
@@ -80,6 +83,18 @@ public class ProgramSet {
             this.shadowCompCompute[i] = readComputeArray(directory, sourceProvider, "shadowcomp" + ((i == 0) ? "" : i));
         }
 
+        this.setup = new ComputeSource[100][];
+        for (int i = 0; i < setup.length; i++) {
+            ComputeSource source = readComputeSource(directory, sourceProvider, "setup" + ((i == 0) ? "" : i), this);
+            this.setup[i] = source == null ? null : new ComputeSource[]{source};
+        }
+
+        this.begin = readProgramArray(directory, sourceProvider, "begin", shaderProperties);
+        this.beginCompute = new ComputeSource[begin.length][];
+        for (int i = 0; i < begin.length; i++) {
+            this.beginCompute[i] = readComputeArray(directory, sourceProvider, "begin" + ((i == 0) ? "" : i));
+        }
+
         this.prepare = readProgramArray(directory, sourceProvider, "prepare", shaderProperties);
         this.prepareCompute = new ComputeSource[prepare.length][];
         for (int i = 0; i < prepare.length; i++) {
@@ -117,7 +132,7 @@ public class ProgramSet {
 
         this.composite = readProgramArray(directory, sourceProvider, "composite", shaderProperties);
         this.compositeCompute = new ComputeSource[composite.length][];
-        for (int i = 0; i < deferred.length; i++) {
+        for (int i = 0; i < composite.length; i++) {
             this.compositeCompute[i] = readComputeArray(directory, sourceProvider, "composite" + ((i == 0) ? "" : i));
         }
         this.compositeFinal = readProgramSource(directory, sourceProvider, "final", this, shaderProperties);
@@ -150,7 +165,7 @@ public class ProgramSet {
     private ProgramSource[] readProgramArray(AbsolutePackPath directory,
                                              Function<AbsolutePackPath, String> sourceProvider, String name,
                                              ShaderProperties shaderProperties) {
-        ProgramSource[] programs = new ProgramSource[99];
+        ProgramSource[] programs = new ProgramSource[100];
 
         for (int i = 0; i < programs.length; i++) {
             String suffix = i == 0 ? "" : Integer.toString(i);
@@ -260,6 +275,18 @@ public class ProgramSet {
 
     public ProgramSource[] getShadowComposite() {
         return shadowcomp;
+    }
+
+    public ComputeSource[][] getSetup() {
+        return setup;
+    }
+
+    public ProgramSource[] getBegin() {
+        return begin;
+    }
+
+    public ComputeSource[][] getBeginCompute() {
+        return beginCompute;
     }
 
     public ProgramSource[] getPrepare() {
